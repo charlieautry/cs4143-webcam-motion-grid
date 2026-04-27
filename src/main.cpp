@@ -3,6 +3,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
+#include <opencv2/opencv.hpp>
 
 #include "shader.h"
 #include "camera.h"
@@ -105,8 +106,25 @@ int main() {
         gridConfig.height * gridConfig.cellSize * 0.5f
     );
 
+    // Webcam
+    cv::VideoCapture cap(0);
+    if (!cap.isOpened()) {
+        std::cerr << "Failed to open webcam" << std::endl;
+        return -1;
+    }
+
+    cv::Mat frame, small, rgb;
+
     // Render loop
     while (!glfwWindowShouldClose(window)) {
+        // Capture webcam frame and update grid colors
+        cap >> frame;
+        if (!frame.empty()) {
+            cv::resize(frame, small, cv::Size(gridConfig.width, gridConfig.height));
+            cv::cvtColor(small, rgb, cv::COLOR_BGR2RGB);
+            grid.updateFromFrame(rgb.data, gridConfig.width, gridConfig.height);
+        }
+
         glClearColor(0.1f, 0.1f, 0.12f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -128,6 +146,7 @@ int main() {
         glfwPollEvents();
     }
 
+    cap.release();
     grid.cleanup();
     glDeleteProgram(shaderProgram);
     glfwTerminate();
