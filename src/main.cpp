@@ -83,15 +83,53 @@ int main() {
     glfwSetKeyCallback(window, keyCallback);
     glEnable(GL_DEPTH_TEST);
 
+    // Shaders
+    GLuint shaderProgram = loadShaderProgram(
+        "media/shaders/grid/grid.vert",
+        "media/shaders/grid/grid.frag"
+    );
+    if (!shaderProgram) {
+        std::cerr << "Failed to load shaders" << std::endl;
+        return -1;
+    }
+
+    // Grid
+    GridConfig gridConfig;
+    Grid grid;
+    grid.init(gridConfig);
+
+    // Center camera on the grid
+    camera.target = glm::vec3(
+        gridConfig.width * gridConfig.cellSize * 0.5f,
+        0.0f,
+        gridConfig.height * gridConfig.cellSize * 0.5f
+    );
+
     // Render loop
     while (!glfwWindowShouldClose(window)) {
         glClearColor(0.1f, 0.1f, 0.12f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+        // View and projection matrices
+        int fbWidth, fbHeight;
+        glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+        float aspect = (float)fbWidth / (float)fbHeight;
+
+        glm::mat4 view = camera.getViewMatrix();
+        glm::mat4 projection = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 500.0f);
+
+        glUseProgram(shaderProgram);
+        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, &view[0][0]);
+        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, &projection[0][0]);
+
+        grid.render();
+
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
+    grid.cleanup();
+    glDeleteProgram(shaderProgram);
     glfwTerminate();
     return 0;
 }
