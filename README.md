@@ -1,4 +1,4 @@
-# Webcam Pixel Grid
+# Webcam to 3D Motion Grid
 
 CS 4143 final project. Takes a live webcam feed and turns it into a 3D grid of extruded columns. Each column gets its color from the matching pixel and its height from motion detected with dense optical flow. You can orbit around with the mouse.
 
@@ -46,13 +46,3 @@ Keys:
 ## How it works
 
 OpenCV grabs a frame, downsamples it to grid resolution for color, and runs Farneback optical flow at 320x240 for motion. The motion magnitudes get downsampled and fed to the grid, which lerps each column's height (fast rise, slow fall — looked too snappy without it). Heights and colors go to the GPU as instanced attributes so the whole grid is one draw call. Phong shading with light intensity tied to average motion across the scene, so things get brighter when you move.
-
-## Layout
-
-```
-src/        main, camera, grid, shader loader, text overlay
-include/    gl3w + glcorearb headers
-external/   glm
-lib/        gl3w.c, glfw source
-bin/        exe, OpenCV dlls, shaders under media/shaders/grid/
-```
