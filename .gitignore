@@ -7,7 +7,6 @@ bin/*
 # ide / tooling
 .vs/
 .vscode/
-.claude/
 
 # misc
 *.lib
