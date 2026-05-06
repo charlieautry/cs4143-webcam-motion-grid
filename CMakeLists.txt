@@ -32,6 +32,7 @@ add_executable(final_project
     src/shader.cpp
     src/camera.cpp
     src/grid.cpp
+    src/text.cpp
     lib/gl3w.c
 )
 

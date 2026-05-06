@@ -1,4 +1,9 @@
+// instanced column grid mesh gen webcam color mapping
+// motion driven height extrusion w/ smooth lerp
+
 #include "grid.h"
+
+// unit box mesh 24 verts w/ per face normals 36 indices
 
 struct BoxVertex {
     glm::vec3 position;
@@ -6,22 +11,22 @@ struct BoxVertex {
 };
 
 static const BoxVertex BOX_VERTICES[] = {
-    // Front face (z = 1)
+    // front face z = 1
     {{0, 0, 1}, {0, 0, 1}}, {{1, 0, 1}, {0, 0, 1}},
     {{1, 1, 1}, {0, 0, 1}}, {{0, 1, 1}, {0, 0, 1}},
-    // Back face (z = 0)
+    // back face z = 0
     {{1, 0, 0}, {0, 0, -1}}, {{0, 0, 0}, {0, 0, -1}},
     {{0, 1, 0}, {0, 0, -1}}, {{1, 1, 0}, {0, 0, -1}},
-    // Left face (x = 0)
+    // left face x = 0
     {{0, 0, 0}, {-1, 0, 0}}, {{0, 0, 1}, {-1, 0, 0}},
     {{0, 1, 1}, {-1, 0, 0}}, {{0, 1, 0}, {-1, 0, 0}},
-    // Right face (x = 1)
+    // right face x = 1
     {{1, 0, 1}, {1, 0, 0}}, {{1, 0, 0}, {1, 0, 0}},
     {{1, 1, 0}, {1, 0, 0}}, {{1, 1, 1}, {1, 0, 0}},
-    // Top face (y = 1)
+    // top face y = 1
     {{0, 1, 1}, {0, 1, 0}}, {{1, 1, 1}, {0, 1, 0}},
     {{1, 1, 0}, {0, 1, 0}}, {{0, 1, 0}, {0, 1, 0}},
-    // Bottom face (y = 0)
+    // bottom face y = 0
     {{0, 0, 0}, {0, -1, 0}}, {{1, 0, 0}, {0, -1, 0}},
     {{1, 0, 1}, {0, -1, 0}}, {{0, 0, 1}, {0, -1, 0}},
 };
@@ -35,9 +40,13 @@ static const GLuint BOX_INDICES[] = {
     20, 21, 22,  22, 23, 20,   // bottom
 };
 
+// init
+
 void Grid::init(const GridConfig& config) {
     config_ = config;
-    instances_.resize(instanceCount());
+    int count = instanceCount();
+    instances_.resize(count);
+    currentHeights_.resize(count, 0.1f);
 
     for (int row = 0; row < config_.height; ++row) {
         for (int col = 0; col < config_.width; ++col) {
@@ -55,6 +64,37 @@ void Grid::init(const GridConfig& config) {
     createInstanceBuffer();
 }
 
+void Grid::resize(int newWidth, int newHeight) {
+    config_.width = newWidth;
+    config_.height = newHeight;
+    int count = instanceCount();
+    instances_.resize(count);
+    currentHeights_.assign(count, 0.1f);
+    averageMotion_ = 0.0f;
+
+    for (int row = 0; row < config_.height; ++row) {
+        for (int col = 0; col < config_.width; ++col) {
+            int i = row * config_.width + col;
+            instances_[i].gridPos = glm::vec2(
+                col * config_.cellSize,
+                row * config_.cellSize
+            );
+            instances_[i].color = glm::vec3(0.2f);
+            instances_[i].height = 0.1f;
+        }
+    }
+
+    // reallocate the instance buffer for the new count
+    glBindVertexArray(boxVAO_);
+    glBindBuffer(GL_ARRAY_BUFFER, instanceVBO_);
+    glBufferData(GL_ARRAY_BUFFER,
+        instances_.size() * sizeof(ColumnInstance),
+        instances_.data(), GL_DYNAMIC_DRAW);
+    glBindVertexArray(0);
+}
+
+// gpu resource setup
+
 void Grid::createBoxMesh() {
     glGenVertexArrays(1, &boxVAO_);
     glGenBuffers(1, &boxVBO_);
@@ -65,16 +105,14 @@ void Grid::createBoxMesh() {
     glBindBuffer(GL_ARRAY_BUFFER, boxVBO_);
     glBufferData(GL_ARRAY_BUFFER, sizeof(BOX_VERTICES), BOX_VERTICES, GL_STATIC_DRAW);
 
-    // Position: location 0
+    // vertex attribs position loc 0 and normal loc 1
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(BoxVertex), (void*)0);
 
-    // Normal: location 1
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(BoxVertex),
         (void*)offsetof(BoxVertex, normal));
 
-    // Index buffer
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, boxEBO_);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(BOX_INDICES), BOX_INDICES, GL_STATIC_DRAW);
 }
@@ -86,19 +124,18 @@ void Grid::createInstanceBuffer() {
         instances_.size() * sizeof(ColumnInstance),
         instances_.data(), GL_DYNAMIC_DRAW);
 
-    // gridPos: location 2 (vec2)
+    // per instance attribs divisor 1
+    // gridPos loc 2 color loc 3 height loc 4
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(ColumnInstance),
         (void*)offsetof(ColumnInstance, gridPos));
     glVertexAttribDivisor(2, 1);
 
-    // color: location 3 (vec3)
     glEnableVertexAttribArray(3);
     glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(ColumnInstance),
         (void*)offsetof(ColumnInstance, color));
     glVertexAttribDivisor(3, 1);
 
-    // height: location 4 (float)
     glEnableVertexAttribArray(4);
     glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(ColumnInstance),
         (void*)offsetof(ColumnInstance, height));
@@ -107,11 +144,14 @@ void Grid::createInstanceBuffer() {
     glBindVertexArray(0);
 }
 
-void Grid::updateFromFrame(const unsigned char* rgbData, int frameWidth, int frameHeight) {
+// per frame updates
+
+void Grid::updateFromFrame(const unsigned char* rgbData) {
+    // map webcam pixels rgb 0-255 to per instance color floats 0-1
     for (int row = 0; row < config_.height; ++row) {
         for (int col = 0; col < config_.width; ++col) {
             int i = row * config_.width + col;
-            int pixelIdx = (row * frameWidth + col) * 3;
+            int pixelIdx = (row * config_.width + col) * 3;
             instances_[i].color = glm::vec3(
                 rgbData[pixelIdx + 0] / 255.0f,
                 rgbData[pixelIdx + 1] / 255.0f,
@@ -119,8 +159,37 @@ void Grid::updateFromFrame(const unsigned char* rgbData, int frameWidth, int fra
             );
         }
     }
+}
 
-    // Upload updated instance data (buffer orphaning)
+void Grid::updateMotion(const unsigned char* motionData) {
+    int count = instanceCount();
+
+    // sensitivity is a noise gate motion below threshold gets ignored
+    float threshold = (1.0f - config_.sensitivity) * 0.3f;
+    float motionSum = 0.0f;
+    for (int i = 0; i < count; ++i) {
+        float motionValue = motionData[i] / 255.0f;
+
+        // gate ditches motion below threshold and remaps the rest to 0-1
+        motionValue = (motionValue > threshold)
+            ? (motionValue - threshold) / (1.0f - threshold)
+            : 0.0f;
+
+        // asymmetric lerp fast rise slow fall the trail looked off until this
+        float baseHeight = 15.0f;
+        float target = motionValue * baseHeight * config_.heightMultiplier;
+        float lerpRate = (target > currentHeights_[i]) ? config_.riseSpeed : config_.fallSpeed;
+        currentHeights_[i] += (target - currentHeights_[i]) * lerpRate;
+
+        float minHeight = 0.1f;
+        instances_[i].height = (currentHeights_[i] > minHeight) ? currentHeights_[i] : minHeight;
+
+        motionSum += motionValue;
+    }
+
+    averageMotion_ = motionSum / (float)count;
+
+    // push instance data to gpu buffer orphaning so async updates dont blow up
     glBindBuffer(GL_ARRAY_BUFFER, instanceVBO_);
     glBufferData(GL_ARRAY_BUFFER,
         instances_.size() * sizeof(ColumnInstance),
@@ -129,6 +198,8 @@ void Grid::updateFromFrame(const unsigned char* rgbData, int frameWidth, int fra
         instances_.size() * sizeof(ColumnInstance),
         instances_.data());
 }
+
+// rendering
 
 void Grid::render() const {
     glBindVertexArray(boxVAO_);

@@ -1,3 +1,5 @@
+// orbit camera done with spherical coords
+
 #include "camera.h"
 #include <cmath>
 
@@ -8,6 +10,7 @@ static float clampf(float val, float lo, float hi) {
 }
 
 glm::vec3 OrbitCamera::getPosition() const {
+    // spherical yaw pitch distance to cartesian offset from target
     glm::vec3 pos;
     pos.x = target.x + distance * cosf(pitch) * sinf(yaw);
     pos.y = target.y + distance * sinf(pitch);
@@ -31,6 +34,7 @@ void OrbitCamera::zoom(float delta) {
 }
 
 void OrbitCamera::pan(float dx, float dy) {
+    // pan in cam local right/up directions
     glm::vec3 forward = glm::normalize(target + panOffset - getPosition());
     glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
     glm::vec3 up = glm::cross(right, forward);
